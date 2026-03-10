@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Viewer - Debug Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .toolbar {
+            background: #111;
+            color: #fff;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 1000;
+            flex-shrink: 0;
+        }
+
+        .toolbar-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toolbar-section label {
+            opacity: 0.7;
+            font-size: 14px;
+        }
+
+        .toolbar-section select,
+        .toolbar-section button {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .toolbar-section select:hover,
+        .toolbar-section button:hover {
+            background: #333;
+            border-color: #555;
+        }
+
+        .toolbar-section select:focus,
+        .toolbar-section button:focus {
+            outline: none;
+            border-color: #6cf;
+        }
+
+        .divider {
+            width: 1px;
+            height: 24px;
+            background: #444;
+        }
+
+        .width-display {
+            color: #6cf;
+            font-weight: 600;
+            font-family: monospace;
+            font-size: 14px;
+            min-width: 70px;
+        }
+
+        .width-display.out-of-range {
+            color: #f66;
+        }
+
+        .page-link {
+            color: #fff;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .page-link:hover {
+            background: #333;
+            text-decoration: underline;
+        }
+
+        .page-link.active {
+            background: #6cf;
+            color: #111;
+            font-weight: 600;
+        }
+
+        .viewer-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            background: #1a1a1a;
+            overflow: auto;
+            position: relative;
+        }
+
+        .iframe-wrapper {
+            background: #fff;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            position: relative;
+            height: fit-content;
+            min-height: 100%;
+            width: 100%;
+        }
+
+        .iframe-wrapper.transitioning {
+            transition: width 0.2s ease, box-shadow 0.3s ease;
+        }
+
+        .iframe-wrapper.constrained {
+            box-shadow: 0 0 40px rgba(102, 204, 255, 0.3);
+        }
+
+        iframe {
+            display: block;
+            width: 100%;
+            height: 100vh;
+            border: none;
+        }
+
+        iframe.resizing {
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .resize-handle {
+            position: absolute;
+            top: 0;
+            right: -10px;
+            width: 20px;
+            height: 100%;
+            background: transparent;
+            cursor: ew-resize;
+            z-index: 10;
+        }
+
+        .resize-handle:hover {
+            background: rgba(102, 204, 255, 0.2);
+        }
+
+        .resize-handle::before {
+            content: '';
+            position: absolute;
+            right: 9px;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: rgba(102, 204, 255, 0.4);
+        }
+
+        .resize-handle::after {
+            content: '';
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 60px;
+            background: #6cf;
+            border-radius: 2px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .resize-handle:hover::after {
+            opacity: 1;
+        }
+
+        .iframe-wrapper.constrained .resize-handle::before {
+            background: rgba(102, 204, 255, 0.6);
+        }
+
+        .toolbar-right {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .refresh-btn {
+            padding: 6px 12px;
+            background: #3163dc;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #2751b3;
+        }
+
+        .resize-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            cursor: ew-resize;
+            z-index: 9999;
+            display: none;
+        }
+
+        .resize-overlay.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="toolbar-section">
+            <label>Page:</label>
+            <a href="#" class="page-link active" data-page="index.html">Main</a>
+            <a href="#" class="page-link" data-page="full.html">Full</a>
+            <a href="#" class="page-link" data-page="small.html">Small</a>
+            <a href="#" class="page-link" data-page="small-2.html">Small-2</a>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="toolbar-section">
+            <label>Breakpoint:</label>
+            <select id="breakpoint-selector">
+                <option value="1200+">1200+ (Full Width)</option>
+                <option value="1000-1199">1000-1199</option>
+                <option value="768-999">768-999</option>
+                <option value="560-767">560-767</option>
+                <option value="375-559">375-559</option>
+                <option value="320-374">320-374 (Mobile)</option>
+            </select>
+        </div>
+
+        <div class="toolbar-section">
+            <label>Width:</label>
+            <span id="current-width" class="width-display">-</span>
+        </div>
+
+        <div class="toolbar-right">
+            <button class="refresh-btn" id="refresh-btn" title="Refresh iframe">
+                ↻ Refresh
+            </button>
+        </div>
+    </div>
+
+    <div class="viewer-container" id="viewer-container">
+        <div class="iframe-wrapper" id="iframe-wrapper">
+            <iframe id="page-frame" src="index.html"></iframe>
+            <div class="resize-handle" id="resize-handle"></div>
+        </div>
+    </div>
+    <div class="resize-overlay" id="resize-overlay"></div>
+
+    <script>
+        const breakpoints = {
+            '1200+': { min: 1200, max: 9999, label: '1200+ (Full Width)' },
+            '1000-1199': { min: 1000, max: 1199, label: '1000-1199' },
+            '768-999': { min: 768, max: 999, label: '768-999' },
+            '560-767': { min: 560, max: 767, label: '560-767' },
+            '375-559': { min: 375, max: 559, label: '375-559' },
+            '320-374': { min: 320, max: 374, label: '320-374 (Mobile)' }
+        };
+
+        let currentBreakpoint = '1200+';
+        let currentPage = 'index.html';
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        const iframe = document.getElementById('page-frame');
+        const iframeWrapper = document.getElementById('iframe-wrapper');
+        const resizeHandle = document.getElementById('resize-handle');
+        const resizeOverlay = document.getElementById('resize-overlay');
+        const bpSelector = document.getElementById('breakpoint-selector');
+        const widthDisplay = document.getElementById('current-width');
+        const pageLinks = document.querySelectorAll('.page-link');
+        const refreshBtn = document.getElementById('refresh-btn');
+
+        // Page navigation
+        pageLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const page = link.dataset.page;
+                if (page !== currentPage) {
+                    currentPage = page;
+                    iframe.src = page;
+                    
+                    pageLinks.forEach(l => l.classList.remove('active'));
+                    link.classList.add('active');
+                }
+            });
+        });
+
+        // Breakpoint selector
+        bpSelector.addEventListener('change', (e) => {
+            currentBreakpoint = e.target.value;
+            applyBreakpoint();
+        });
+
+        // Refresh button
+        refreshBtn.addEventListener('click', () => {
+            iframe.src = iframe.src;
+        });
+
+        // Resize handle
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = iframeWrapper.offsetWidth;
+            document.body.style.cursor = 'ew-resize';
+            iframeWrapper.classList.remove('transitioning');
+            iframe.classList.add('resizing');
+            resizeOverlay.classList.add('active');
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+
+            const delta = e.clientX - startX;
+            let newWidth = startWidth + delta;
+
+            if (currentBreakpoint !== 'full') {
+                const bp = breakpoints[currentBreakpoint];
+                newWidth = Math.min(Math.max(newWidth, bp.min), bp.max);
+            } else {
+                newWidth = Math.max(newWidth, 320);
+            }
+
+            iframeWrapper.style.width = newWidth + 'px';
+            updateWidthDisplay(newWidth);
+        });
+
+        const stopResize = () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = '';
+                iframe.classList.remove('resizing');
+                resizeOverlay.classList.remove('active');
+            }
+        };
+
+        document.addEventListener('mouseup', stopResize);
+        resizeOverlay.addEventListener('mouseup', stopResize);
+        window.addEventListener('blur', stopResize);
+
+        function applyBreakpoint() {
+            const bp = breakpoints[currentBreakpoint];
+
+            iframeWrapper.classList.add('transitioning');
+
+            if (currentBreakpoint === '1200+') {
+                iframeWrapper.style.width = '100%';
+                iframeWrapper.style.minWidth = bp.min + 'px';
+                iframeWrapper.style.maxWidth = '';
+                iframeWrapper.classList.remove('constrained');
+                setTimeout(() => {
+                    updateWidthDisplay(iframeWrapper.offsetWidth);
+                    iframeWrapper.classList.remove('transitioning');
+                }, 250);
+                return;
+            }
+
+            iframeWrapper.classList.add('constrained');
+            const currentWidth = iframeWrapper.offsetWidth;
+            const targetWidth = Math.min(Math.max(currentWidth, bp.min), bp.max);
+
+            iframeWrapper.style.width = targetWidth + 'px';
+            iframeWrapper.style.minWidth = bp.min + 'px';
+            iframeWrapper.style.maxWidth = bp.max + 'px';
+
+            setTimeout(() => {
+                updateWidthDisplay(targetWidth);
+                iframeWrapper.classList.remove('transitioning');
+            }, 250);
+        }
+
+        function updateWidthDisplay(width) {
+            if (!width) {
+                width = iframeWrapper.offsetWidth;
+            }
+
+            widthDisplay.textContent = width + 'px';
+
+            const bp = breakpoints[currentBreakpoint];
+            const isInRange = width >= bp.min && (currentBreakpoint === '1200+' || width <= bp.max);
+            widthDisplay.classList.toggle('out-of-range', !isInRange);
+        }
+
+        // Update width on window resize
+        window.addEventListener('resize', () => {
+            if (!isResizing && currentBreakpoint === '1200+') {
+                updateWidthDisplay();
+            }
+        });
+
+        // Initial setup
+        setTimeout(() => {
+            updateWidthDisplay();
+        }, 100);
+    </script>
+</body>
+</html>
